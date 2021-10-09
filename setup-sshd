@@ -1,0 +1,45 @@
+#!/bin/bash
+
+set -ex
+
+write_key() {
+	mkdir -p "${JENKINS_AGENT_HOME}/.ssh"
+	echo "$1" > "${JENKINS_AGENT_HOME}/.ssh/authorized_keys"
+	chown -Rf jenkins:jenkins "${JENKINS_AGENT_HOME}/.ssh"
+	chmod 0700 -R "${JENKINS_AGENT_HOME}/.ssh"
+}
+
+if [[ $JENKINS_SLAVE_SSH_PUBKEY == ssh-* ]]; then
+  write_key "${JENKINS_SLAVE_SSH_PUBKEY}"
+fi
+
+if [ -S /var/run/docker.sock ]; then
+  if [ "${UNAME}" == Darwin ]; then
+    # support run from Mac
+    addgroup jenkins root
+  else
+    # support run from CentOS/Ubuntu
+    # create group if not exists
+    if !(egrep -q "^docker" /etc/group); then
+      DOCKER_SOCKET_OWNER_GROUP_ID=$(stat -c %g /var/run/docker.sock)
+      addgroup -g ${DOCKER_SOCKET_OWNER_GROUP_ID} docker
+      addgroup jenkins docker
+    fi
+  fi
+fi
+
+# ensure variables passed to docker container are also exposed to ssh sessions
+env | grep _ >> /etc/environment
+
+ssh-keygen -A
+
+if [[ $# -gt 0 ]]; then
+  if [[ $1 == ssh-* ]]; then
+    write_key "$1"
+    shift 1
+  else
+    "$@"
+  fi
+fi
+
+/usr/sbin/sshd -D -e "${@}"
